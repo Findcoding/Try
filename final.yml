@@ -1,0 +1,128 @@
+---
+- name: Deploy project with Docker using Ansible
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  become: yes
+
+  vars_files:
+    - secret.yml
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+    node_src_path: "/tmp/node-v14.18.2-linux-x64.tar.xz"
+    node_dest_path: "/data/bijendar/final/"
+
+    git_repo_url: "gitlab.jprp.jio.com/agriiot/jkkm/kmsv2.git"
+    git_dest_dir: "/data/bijendar/final/kmsv2"
+    # git_usr: ""
+    # git_psw: ""
+    # git_branch: ""
+    # git_version: ""
+
+    copy_src_path: "/data/bijendar/final/kmsv2/"
+    copy_dest_path: "/data/bijendar/final/"
+
+    dockerfile_path: "/data/bijendar/final"
+    work_dir: "/app/"  # path for all source files prsent inside docker container
+    copy_dir: "/data/bijendar/final/temp/"  # move all data from container to this location
+
+    tar_src_path: "/data/bijendar/final/temp/"
+    tar_dest_path: "/data/bijendar/final/temp"
+
+    artifactory_url: "http://10.135.128.207/artifactory/jkkm/tags/bijendar/"
+    # arti_username: ""
+    # arti_password: ""
+
+
+
+  tasks:
+    - name: Copy Node and Npm tar file
+      copy:
+        src: "{{ node_src_path }}"
+        dest: "{{ node_dest_path }}"
+
+    - name: Clone Git repository
+      ansible.builtin.git:
+        repo: "http://{{ git_usr }}:{{ git_psw }}@{{ git_repo_url }}"
+        dest: "{{ git_dest_dir }}"
+        version: "{{ git_branch }}"
+    
+
+    - name: Checkout specific version within the cloned branch
+      command: git checkout "{{ git_version }}"
+      args:
+        chdir: "{{ git_dest_dir }}"
+      
+
+    - name: Copy all files
+      copy:
+        src: "{{ copy_src_path }}"
+        dest: "{{ copy_dest_path }}"
+      
+
+    - name: Remove "kmsv2" directory
+      file:
+        path: "{{ git_dest_dir }}"
+        state: absent
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+    
+    - name: Upgrade pip
+      pip:
+        name: pip
+        executable: pip3
+        state: latest
+
+    - name: Install Docker Python module
+      pip:
+        name: docker
+        executable: pip3
+        state: present
+
+
+    - name: Build Docker image from Dockerfile
+      docker_image:
+        name: image_"{{ git_branch }}"_"{{ git_version }}"  
+        build:
+          path: "{{ dockerfile_path }}"
+        source: build  
+        pull: yes  # Explicitly set build.pull option
+        state: present
+    
+
+    - name: Build Docker container
+      docker_container:
+        name: container_"{{ git_branch }}"_"{{ git_version }}" 
+        image: image_"{{ git_branch }}"_"{{ git_version }}" 
+        state: started
+        detach: yes
+      register: container_info
+
+
+    - name: Copy data from Docker container to local directory
+      command: docker cp {{ container_info.container.Id }}:"{{ work_dir }}" "{{ copy_dir }}"
+    
+    - name: Stop Docker container
+      docker_container:
+        name: container_"{{ git_branch }}"_"{{ git_version }}" 
+        state: stopped
+      ignore_errors: yes  
+
+    - name: Remove Docker container
+      docker_container:
+        name: container_"{{ git_branch }}"_"{{ git_version }}" 
+        state: absent
+
+    - name: Create tar.gz archive
+      archive:
+        path: "{{ tar_src_path }}"
+        dest: /data/bijendar/final/temp/node_"{{ git_version }}".tar.gz
+        format: gz
+    
+    - name: Uplaod tar to Artifactory
+      command: curl -v -X PUT --user "{{ arti_username }}":"{{ arti_password }}" --upload-file /data/bijendar/final/temp/node_"{{ git_version }}".tar.gz "{{ artifactory_url }}"
