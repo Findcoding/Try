@@ -36,11 +36,11 @@ resource "openstack_compute_instance_v2" "test-server" {
     security_groups = ["default"]
 
     metadata = {
-    this = "that"
+      this = "that"
     }
 
     network {
-    name = "my_network"
+      name = "my_network"
     }
   
 }
