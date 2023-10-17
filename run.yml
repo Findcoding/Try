@@ -1,0 +1,36 @@
+
+---
+- name: Deploy project with Docker using Ansible
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  become: yes
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    dockerfile_path: "/data/bijendar/final"
+
+  tasks:
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+
+    - name: Install Docker Python module
+      pip:
+        name: docker
+        executable: pip3
+        state: present
+
+    - name: Build Docker image from Dockerfile
+      docker_image:
+        name: node_ansible_image
+        build:
+          path: "{{ dockerfile_path }}"
+        source: build  
+        pull: yes  # Explicitly set build.pull option
+        state: present
+    
+    
+      

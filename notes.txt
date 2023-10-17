@@ -1,0 +1,217 @@
+export https_proxy=http://jpe3proxy.jaws.jio.com:8080
+export http_proxy=http://jpe3proxy.jaws.jio.com:8080
+
+
+
+---
+- name: Deploy project with Docker using Ansible
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  become: yes
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  tasks:
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+
+    - name: Install Docker Python module
+      pip:
+        name: docker
+        executable: pip3
+        state: present
+
+    - name: Build npm project inside Docker container
+      docker_container:
+        name: nodejs_apps
+        image: ansible_node_image
+        volumes:
+          - /data/bijendar/node/temp:/app
+      register: container_result
+    
+    - name: Execute npm commands inside the container
+      shell: |
+        docker exec {{ container_result.container.Id }} sh -c "cd /app && npm install && npm run build"
+
+
+
+---
+- name: Deploy project with Docker using Ansible
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  become: yes
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  tasks:
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+
+    - name: Install Docker Python module
+      pip:
+        name: docker
+        executable: pip3
+        state: present
+    
+    - name: Get information about Docker images
+      docker_image_facts:
+        name: ansible_node_image
+      register: image_info
+    
+    - name: Execute npm commands inside the container
+      shell: |
+        docker run -it {{ image_info.images[0].id }} sh -c "npm install && npm run build"
+      volumes:
+        - /data/bijendar/node/temp:/app
+      
+
+    
+
+
+****************
+---
+- name: Deploy project with Docker using Ansible
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  become: yes
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  tasks:
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+
+    - name: Install Docker Python module
+      pip:
+        name: docker
+        executable: pip3
+        state: present
+
+    - name: Build npm project inside Docker container
+      docker_container:
+        name: nodejs_apps
+        image: ansible_node_image
+        command:
+          - sh
+          - -c
+          - "cd /app && npm install && npm run build"
+        volumes:
+          - /data/bijendar/node/temp/:/app/
+        ports:
+          - "8888:8000"
+
+
+
+
+
+
+***************
+
+
+
+-----------------------------------------
+
+
+
+-----------------------------------------
+
+# Use a base image with CentOS
+FROM centos:7
+
+
+# Set proxy environment variables
+ENV http_proxy=http://jpe3proxy.jaws.jio.com:8080
+ENV https_proxy=http://jpe3proxy.jaws.jio.com:8080
+ENV no_proxy=localhost,127.0.0.1
+
+
+# Install required dependencies
+RUN yum clean all
+#RUN yum -y update
+#RUN yum -y install epel-release
+#RUN yum -y install nodejs npm
+
+# Set working directory
+WORKDIR /app
+
+# Copy package.json and package-lock.json files
+#COPY package*.json ./
+
+# Copy code from source directory to working directory
+COPY . /app
+
+# Install necessary dependencies
+RUN tar -xJf node-v14.18.2-linux-x64.tar.xz
+RUN mv node-v14.18.2-linux-x64 /usr/local/
+RUN ln -s /usr/local/node-v14.18.2-linux-x64/bin/node /usr/local/bin/node
+RUN ln -s /usr/local/node-v14.18.2-linux-x64/bin/npm /usr/local/bin/npm
+RUN npm install -g npm@9.8.0
+RUN rm -rf node-v14.18.2-linux-x64.tar.xz
+RUN rm -rf Dockerfile
+RUN npm config set legacy-peer-deps true
+RUN npm install  &&  npm run build
+
+EXPOSE 8000
+
+# Start a simple web server to keep the container running
+CMD ["node", "-e", "console.log('Container is running...'); setInterval(function() {}, 1000);"]
+
+
+
+
+
+
+---
+- name: Copy Files and Perform Other Tasks
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  become: yes
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    git_repo_url: "gitlab.jprp.jio.com/agriiot/jkkm/kmsv2.git"
+    git_dest_dir: "/data/bijendar/node/kmsv2"
+    git_usr: "kms-frontend"
+    git_psw: "nDzNzvv1PnayxYZduzkN"
+    git_branch: "KMS-FRONTEND-DEV"
+
+  tasks:
+  - name: Upload file to Artifactory using curl module
+    uri:
+      url: "http://10.135.128.207/artifactory/jkkm/tags/bijendar/"
+      method: PUT
+      user: "jiokrishi"
+      password: "jiokrishi"
+      src: /data/bijendar/node/archive1.tar.gz
+      force_basic_auth: yes
+      return_content: yes
+      headers:
+        Content-Type: application/tar
+        Accept: application/json
+      status_code: 201
+      remote_src: no
+
+    register: upload_result
+
+  - name: Display upload result
+    debug:
+      var: upload_result
+
+
+

@@ -1,0 +1,641 @@
+---
+- name: Install required dependencies
+  yum:
+   name: "{{ item }}"
+   state: present
+  loop:
+   - gcc
+   - gcc-c++
+   - perl
+   - perl-devel
+   - perl-core
+   - perl-ExtUtils-Embed
+   - libxslt
+   - libxslt-devel
+   - libxml2
+   - libxml2-devel
+   - gd
+   - gd-devel
+   - GeoIP
+   - GeoIP-devel
+   - pcre-devel
+   - zlib-devel
+   - openssl-devel
+   - make
+
+- name: Create directory for source codes
+  shell: mkdir /data/source
+
+- name: Copying archived tar's to source directory
+  copy:
+   src: "{{ item }}"
+   dest: "/data/source"
+  with_items:
+   - "nginx-{{ nginx_ver }}.tar.gz"
+   - "pcre-{{ pcre_ver }}.tar.gz"
+   - "openssl-{{ openssl_ver }}.tar.gz"
+   - "zlib-{{ zlib_ver }}.tar.gz"
+
+- name: Extracting nginx source code
+  shell: tar -xvzf "/data/source/nginx-{{ nginx_ver }}.tar.gz" -C /data/source/
+
+- name: Extracting pcre source code
+  shell: tar -xvzf "/data/source/pcre-{{ pcre_ver }}.tar.gz" -C /data/source/
+
+- name: Extracting openssl source code
+  shell: tar -xvzf "/data/source/openssl-{{ openssl_ver }}.tar.gz" -C /data/source/
+
+- name: Extracting zlib source code
+  shell: tar -xvzf "/data/source/zlib-{{ zlib_ver }}.tar.gz" -C /data/source/
+
+
+- name: Create directory for source codes
+  shell: mkdir /data/tools/
+
+
+- name: Configuring zlib
+  shell: ./configure --prefix=/data/tools/zlib-{{ zlib_ver }} && make && make install
+  args:
+   chdir: "/data/source/zlib-{{ zlib_ver }}"
+
+- name: Configuring pcre
+  shell: ./configure --prefix=/data/tools/pcre-{{ pcre_ver }} && make && make install
+  args:
+   chdir: "/data/source/pcre-{{ pcre_ver }}"
+
+- name: Configuring openssl
+  shell: ./config && make && make install
+  args:
+   chdir: "/data/source/openssl-{{ openssl_ver }}"
+
+
+- name: Copying header file
+  template:
+   src: "ngx_http_header_filter_module.c.j2"
+   dest: "/data/source/nginx-{{ nginx_ver }}/src/http/ngx_http_header_filter_module.c"
+
+- name: Copying nginx.h file
+  template:
+   src: "nginx.h.j2"
+   dest: "/data/source/nginx-{{ nginx_ver }}/src/core/nginx.h"
+
+
+- name: Compile and install Nginx
+  shell: ./configure --user=nginx --group=nginx --prefix=/data/nginx --sbin-path=/data/nginx/usr/sbin/nginx --conf-path=/data/nginx/etc/nginx.conf --pid-path=/data/nginx/var/run/nginx.pid --lock-path=/data/nginx/var/run/nginx.lock --error-log-path=/data/nginx/var/log/nginx/error.log --http-log-path=/data/nginx/var/log/nginx/access.log --with-http_gzip_static_module --with-http_stub_status_module --with-http_ssl_module --with-file-aio --with-http_realip_module --with-debug --with-pcre=/data/source/pcre-8.45 --with-zlib=/data/source/zlib-1.2.13 --with-openssl=/data/source/openssl-1.1.1s --with-http_v2_module && make && make install
+  args:
+   chdir: "/data/source/nginx-{{ nginx_ver }}"
+
+- name: Copying error pages
+  template:
+   src: "{{ item }}"
+   dest: "{{ nginx_install_path }}"
+  with_items:
+   - "403.html.j2"
+   - "404.html.j2"
+   - "502.html.j2"
+   - "error.html.j2"
+
+- name: Copy Nginx configuration file
+  template:
+   src: "nginx.conf.j2"
+   dest: "{{ nginx_install_path }}/etc/nginx.conf"
+
+
+
+
+#----------------------------tasks/sshd_config.yml
+
+---
+- name: Adding SFTP Configuration Details /ssh/sshd_config
+  lineinfile:
+      dest: /etc/ssh/sshd_config
+      insertafter: EOF
+      line: "{{ item }}"
+  with_items:
+      - Match group jiodevicesftp
+      - ForceCommand internal-sftp -P symlink -u 0006
+      - PermitTTY no
+      - ChrootDirectory /data/%u
+      - ForceCommand internal-sftp
+      - AllowTcpForwarding no
+      - X11Forwarding no
+      - PasswordAuthentication no
+      - PubkeyAuthentication yes
+      - AllowAgentForwarding no
+
+- name: Restarting ssh service
+  service:
+      name: sshd
+      state: "{{ item }}"
+  with_items:
+      - stopped
+      - started
+
+
+
+#-----------------------------tasks/useradd.yml
+---
+- name: Adding jiodevicesftp group
+  shell: groupadd jiodevicesftp
+
+- name: Add sftp user one by one
+  user:
+   name: "{{ item | regex_replace(',.*$') }}"
+   shell: /sbin/nologin
+   state: present[]
+   group: jiodevicesftp
+   createhome: yes
+   home: "/data/{{ item | regex_replace(',.*$') }}"
+  with_items: "{{ lookup('file', 'user.txt').splitlines() }}"
+
+- name: change ownership of sftp user main directory
+  file:
+   name: "/data/{{ item | regex_replace(',.*$') }}"
+   owner: root
+   group: root
+   mode: 0755
+   recurse: yes
+  with_items: "{{ lookup('file', 'user.txt').splitlines() }}"
+
+- name: Create /data directory for all user
+  file:
+   path: "/data/{{ item | regex_replace(',.*$') }}/data"
+   state: directory
+   owner: "{{ item | regex_replace(',.*$') }}"
+   group: jiodevicesftp
+   mode: '754'
+   recurse: yes
+  with_items: "{{ lookup('file', 'user.txt').splitlines() }}"
+
+- name: Create .ssh directory for all user
+  file:
+   path: "/data/{{ item | regex_replace(',.*$') }}/.ssh"
+   state: directory
+   owner: "{{ item | regex_replace(',.*$') }}"
+   group: root
+   mode: '500'
+   recurse: yes
+  with_items: "{{ lookup('file', 'user.txt').splitlines() }}"
+
+- name: Create authorized_keys for all user
+  file:
+   path: "/data/{{ item | regex_replace(',.*$') }}/.ssh/authorized_keys"
+   state: touch
+   owner: "{{ item | regex_replace(',.*$') }}"
+   group: jiodevicesftp
+   mode: '600'
+  with_items: "{{ lookup('file', 'user.txt').splitlines() }}"
+
+- name: Changing attributes of authorized keys file
+  shell: chattr +i /data/{{ item | regex_replace(',.*$') }}/.ssh/authorized_keys
+  with_items: "{{ lookup('file', 'user.txt').splitlines() }}"
+
+- name: Changing account expiry for all users
+  shell: chage -E $(date -d +90days +%Y-%m-%d) {{ item | regex_replace(',.*$') }}
+  with_items: "{{ lookup('file', 'user.txt').splitlines() }}"
+
+- name: Changing password expiry for all users
+  shell: chage -M 90 {{ item | regex_replace(',.*$') }}
+  with_items: "{{ lookup('file', 'user.txt').splitlines() }}"
+
+
+
+#------------------------tasks/main.yml
+---
+- name: sshd configuration
+  import_tasks: sshd_config.yml
+- name: Adding users for sftp with home directories and setting permission
+  import_tasks: useradd.yml
+
+
+#-----------------------------httpd.yml
+---
+- name: Create directory for source codes
+  shell: mkdir /data/source
+
+- name: Copying archived tar's to source directory
+  copy:
+   src: "{{ item }}"
+   dest: "/data/source"
+  with_items:
+   - "httpd-{{ httpd_ver }}.tar.gz"
+   - "pcre-{{ pcre_ver }}.tar.gz"
+   - "apr-{{ apr_ver }}.tar.gz"
+   - "apr-util-{{ aprutil_ver }}.tar.gz"
+
+- name: Extracting httpd source code
+  shell: tar -xvzf "/data/source/httpd-{{ httpd_ver }}.tar.gz" -C /data/source/
+
+- name: Extracting pcre source code
+  shell: tar -xvzf "/data/source/pcre-{{ pcre_ver }}.tar.gz" -C /data/source/
+
+- name: Extracting apr source code
+  shell: tar -xvzf "/data/source/apr-{{ apr_ver }}.tar.gz" -C /data/source/
+
+- name: Extracting apr-util source code
+  shell: tar -xvzf "/data/source/apr-util-{{ aprutil_ver }}.tar.gz" -C /data/source/
+
+
+- name: Create directory for source codes
+  shell: mkdir -p /data/tools/repository
+
+- name: Configuring pcre
+  shell: ./configure --prefix=/data/tools/repository/pcre-{{ pcre_ver }} && make && make install
+  args:
+   chdir: "/data/source/pcre-{{ pcre_ver }}"
+
+- name: Copying apr data in httpd
+  shell: mkdir -p /data/source/httpd-{{ httpd_ver }}/srclib/apr && cp -pvr /data/source/apr-{{ apr_ver }}/* /data/source/httpd-{{ httpd_ver }}/srclib/apr/
+
+- name: Copying apr-util data in httpd
+  shell: mkdir -p /data/source/httpd-{{ httpd_ver }}/srclib/apr-util && cp -pvr /data/source/apr-util-{{ aprutil_ver }}/* /data/source/httpd-{{ httpd_ver }}/srclib/apr-util/
+
+- name: Printing the lists of directories stored in the current cache
+  shell: ldconfig -p && LDFLAGS=-Wl,-R,/data/tools/lib
+
+- name: Configuring Apache
+  shell: cd /data/source/httpd-{{ httpd_ver }} && ./configure --prefix=/data/tools/repository/httpd-{{ httpd_ver }} --enable-rewrite=shared --enable-so --enable-cgi --enable-info --enable-http --enable-proxy --enable-authn-alias --enable-authz-owner --enable-auth-digest --enable-dbd --enable-mime-magic --enable-ident --enable-authn-dbd --enable-ssl --enable-mods-shared=all --with-ssl=/data/tools --with-z=/data/tools --enable-deflate --with-mpm=prefork --with-included-apr --with-pcre=/data/tools/repository/pcre-{{ pcre_ver }} && make && make install
+
+- name: Creating symlink of httpd
+  shell: ln -s /etc/init.d/httpd-{{ httpd_ver }} /etc/rc3.d/S92httpd-2.4.57
+
+
+#---------------------------------hpam.yml
+---
+- name: Creating hpam group
+  group:
+    name: hptools
+    gid: 5001
+    state: present
+
+- name: Adding hpam user id
+  user:
+    name: hptools
+    uid: 5001
+    group: hptools
+    password: "{{ 'bF5tUuQc' | password_hash('sha512') }}"
+    append: yes
+
+- name: Set authorized key for monadm
+  authorized_key:
+    user: hptools
+    state: absent
+    key: "{{ lookup('file', 'mykey.pub') }}"
+
+- name: Adding hpam in sudoers file
+  lineinfile:
+     path: /etc/sudoers
+     line: hptools ALL= (ALL) NOPASSWD:ALL
+     insertafter: EOF
+
+
+
+
+
+
+
+
+
+
+
+#**************************************************************************************
+---
+- name: Install perl-ExtUtils-Embed package
+  yum:
+    name: perl-ExtUtils-Embed
+    state: present
+
+
+- name: Create the 'source' directory if not exists
+  file:
+    path: /data/source
+    state: directory
+    mode: '0755'
+  register: source_directory_created
+
+- name: Display whether the directory was created
+  debug:
+    var: source_directory_created.changed
+
+- name: Export proxy environment variable
+  shell: export https_proxy=http://jpe3proxy.jaws.jio.com:8080 && export http_proxy=http://jpe3proxy.jaws.jio.com:8080
+
+- name: Check if Nginx tar file exists
+  stat:
+    path: "/data/source/nginx-1.24.0.tar.gz"
+  register: nginx_file
+
+- name: Download Nginx tar file
+  get_url:
+    url: "https://nginx.org/download/nginx-1.24.0.tar.gz"
+    dest: "/data/source/"
+  when: not nginx_file.stat.exists
+
+
+- name: Check if Zlib tar file exists
+  stat:
+    path: "/data/source/zlib-1.2.8.tar.gz"
+  register: zlib_file
+
+- name: Download Zlib tar file
+  get_url:
+    url: "https://sourceforge.net/projects/libpng/files/zlib/1.2.8/zlib-1.2.8.tar.gz"
+    dest: "/data/source/"
+  when: not zlib_file.stat.exists
+
+
+- name: Check if Openssl tar file exists
+  stat:
+    path: "/data/source/openssl-3.1.2.tar.gz"
+  register: openssl_file
+
+- name: Download Openssl tar file
+  get_url:
+    url: "https://ftp.openssl.org/source/openssl-3.1.2.tar.gz"
+    dest: "/data/source/"
+  when: not openssl_file.stat.exists
+
+
+- name: Check if Pcre tar file exists
+  stat:
+    path: "/data/source/pcre-8.45.tar.gz"
+  register: pcre_file
+
+- name: Download Pcre tar file
+  get_url:
+    url: "https://sourceforge.net/projects/pcre/files/pcre/8.45/pcre-8.45.tar.gz"
+    dest: "/data/source/"
+  when: not pcre_file.stat.exists
+
+
+- name: Check if PHP tar file exists
+  stat:
+    path: "/data/source/php-5.5.38.tar.gz"
+  register: php_file
+
+- name: Download PHP tar file
+  get_url:
+    url: "https://prototype.php.net/distributions/php-5.5.38.tar.gz"
+    dest: "/data/source/"
+  when: not php_file.stat.exists
+
+
+
+- name: List of all tar files to untar
+  set_fact:
+    files_to_untar:
+      - "/data/source/nginx-1.24.0.tar.gz"
+      - "/data/source/zlib-1.2.8.tar.gz"
+      - "/data/source/openssl-1.1.1v.tar.gz"  
+      - "/data/source/pcre-8.45.tar.gz"
+      - "/data/source/php-5.5.38.tar.gz"
+
+- name: Untar the files
+  unarchive:
+    src: "{{ item }}"
+    dest: "/data/source/"
+    copy: no
+  loop: "{{ files_to_untar }}"
+
+- name: Create the 'tools' directory if not exists
+  file:
+    path: /data/tools
+    state: directory
+    mode: '0755'
+  register: tools_directory_created
+
+- name: Display whether the directory was created
+  debug:
+    var: tools_directory_created.changed
+
+
+- name: Create the 'repository' directory if not exists
+  file:
+    path: /data/tools/repository
+    state: directory
+    mode: '0755'
+  register: repository_directory_created
+
+- name: Display whether the directory was created
+  debug:
+    var: repository_directory_created.changed
+
+
+- name: Configure Nginx
+  shell: cd /data/source/nginx-1.24.0 && ./configure --prefix=/data/tools/repository/nginx-1.24.0 --with-http_stub_status_module --with-http_ssl_module --with-pcre=/data/source/pcre-8.45 --with-openssl=/data/source/openssl-1.1.1v --with-zlib=/data/source/zlib-1.2.8  --with-http_perl_module --with-ld-opt="-Wl,-E"
+  args:
+    chdir: /data/source/nginx-1.24.0
+
+- name: Make Install
+  shell: cd /data/source/nginx-1.24.0/ && make && make install
+
+
+- name: Install Stow package
+  yum:
+    name: stow
+    state: present
+
+
+- name: Stow Nginx
+  shell: cd /data/tools/repository/ && stow nginx-1.24.0
+
+
+- name: Configure PHP
+  shell: cd /data/source/php-5.5.38 && ./configure --prefix=/data/tools/repository/php-5.5.38 --with-config-file-path=/data/tools/repository/php-5.5.38/etc --with-mysql=mysqlnd --with-mysqli=mysqlnd --with-pdo-mysql=mysqlnd --with-pear --enable-fpm --enable-soap --enable-sockets --enable-mbstring --enable-ftp --disable-debug --enable-session --with-regex=php --enable-debug=no --enable-ctype --with-gettext --disable-rpath --enable-wddx=shared --enable-opcache=no --enable-pdo --enable-pcntl --with-libxml-dir=/data/tools
+  args:
+    chdir: /data/source/php-5.5.38
+
+- name: Make Install
+  shell: cd /data/source/php-5.5.38/ && make && make install
+
+
+- name: Stow PHP
+  shell: cd /data/tools/repository/ && stow php-5.5.38
+
+
+#**************************************************************************************
+
+---
+- name: Copy files from working server to other server
+  copy:
+    src: "{{ item.src }}"
+    dest: "{{ destination_directory }}"
+  delegate_to: "{{ inventory_hostname }}"
+  loop:
+    - { src: /data/source/nginx-1.24.0.tar.gz}
+    - { src: /data/source/zlib-1.2.8.tar.gz}
+    - { src: /data/source/openssl-1.1.1v.tar.gz}
+    - { src: /data/source/pcre-8.45.tar.gz}
+    - { src: /data/source/php-5.5.38.tar.gz}
+
+
+- name: Print Current Working Directory
+  command: pwd
+  register: current_directory
+
+- name: Display Current Working Directory
+  debug:
+    var: current_directory.stdout
+
+
+########################
+
+- name: Create mwapp group
+  group:
+    name: mwapp
+    gid: 1234
+    state: present
+
+- name: Create mwapp user
+  user:
+    name: mwapp
+    password: "{{ 'mwapp@17&29#' | password_hash('sha512') }}"
+    shell: /bin/bash
+    expires: -1  
+    uid: 5678
+    group: mwapp
+
+- name: Add mwapp to /etc/cron.allow
+  ansible.builtin.lineinfile:
+    path: /etc/cron.allow
+    line: mwapp
+    create: yes
+
+########################
+
+- name: Assemble the Jinja template
+  ansible.builtin.assemble:
+    src: "templates/kernel_tuning.j2"
+    dest: /tmp/limits.conf.partial  
+
+- name: Append the content to limits.conf
+  ansible.builtin.shell: cat /tmp/limits.conf.partial >> /etc/security/limits.conf
+
+- name: Remove the file
+  ansible.builtin.file:
+    path: /tmp/limits.conf.partial
+    state: absent
+
+
+  # /data/bijendar/nginx/roles/nginx_install/templates/kernel_tuning.j2
+
+---
+- hosts: test
+  roles:
+    - {role: nginx_compilation, become: yes, remote_user: centos, become_method: sudo}
+    - {role: httpd_compilation, become: yes, remote_user: centos, become_method: sudo}
+
+
+
+#****************************************************************
+
+- name: Set CAP_NET_BIND_SERVICE capability for NGINX binary
+  ansible.builtin.command: setcap cap_net_bind_service=+ep /usr/sbin/nginx
+
+- name: Create NGINX configuration file
+  ansible.builtin.template:
+    src: nginx.conf.j2  # Path to your NGINX configuration template
+    dest: /etc/nginx/nginx.conf
+    owner: mwapp
+    group: mwapp
+
+- name: Restart NGINX
+  ansible.builtin.service:
+    name: nginx
+    state: restarted
+
+######################################################################
+
+---
+- name: Copy files from working server to other server
+  copy:
+    src: "{{ item.src }}"
+    dest: "{{ destination_directory }}"
+  delegate_to: "{{ inventory_hostname }}"
+  loop:
+    - { src: /data/source/apr-1.7.0.tar.gz}
+    - { src: /data/source/apr-util-1.6.1.tar.gz}
+    - { src: /data/source/httpd-2.4.57.tar.gz}
+    - { src: /data/source/pcre-8.45.tar.gz}
+
+
+- name: List of all tar files to untar
+  set_fact:
+    files_to_untar:
+      - "/data/source/apr-1.7.0.tar.gz"
+      - "/data/source/apr-util-1.6.1.gz"
+      - "/data/source/httpd-2.4.57.tar.gz"  
+      - "/data/source/pcre-8.45.tar.gz"
+
+- name: Untar the files
+  unarchive:
+    src: "{{ item }}"
+    dest: "/data/source/"
+    copy: no
+  loop: "{{ files_to_untar }}"
+
+
+- name: Copying apr data in httpd
+  shell: mkdir -p /data/source/httpd-2.4.57/srclib/apr && cp -pvr /data/source/apr-1.7.0/* /data/source/httpd-2.4.57/srclib/apr/
+
+- name: Copying apr-util data in httpd
+  shell: mkdir -p /data/source/httpd-2.4.57/srclib/apr-util && cp -pvr /data/source/apr-util-1.6.1/* /data/source/httpd-2.4.57/srclib/apr-util/
+
+- name: Printing the lists of directories stored in the current cache
+  shell: ldconfig -p && LDFLAGS=-Wl,-R,/data/tools/lib
+
+- name: Configuring Apache
+  shell: cd /data/source/httpd-2.4.57 && ./configure --prefix=/data/tools/repository/httpd-2.4.57 --enable-rewrite=shared --enable-so --enable-cgi --enable-info --enable-http --enable-proxy --enable-authn-alias --enable-authz-owner --enable-auth-digest --enable-dbd --enable-mime-magic --enable-ident --enable-authn-dbd --enable-ssl --enable-mods-shared=all --with-ssl=/data/tools --with-z=/data/tools --enable-deflate --with-mpm=prefork --with-included-apr --with-pcre=/data/tools/repository/pcre-8.45 && make && make install
+
+- name: Creating symlink of httpd
+  shell: ln -s /etc/init.d/httpd-2.4.57 /etc/rc3.d/S92httpd-2.4.57
+
+
+- name: Create apr directory
+  file:
+    path: /data/source/httpd-2.4.57/srclib/apr
+    state: directory
+
+- name: Copy apr data to httpd source directory
+  command: >
+    cp -pvr /data/source/apr-1.7.0/* /data/source/httpd-2.4.57/srclib/apr/
+
+- name: Create apr-util directory
+  file:
+    path: /data/source/httpd-2.4.57/srclib/apr-util
+    state: directory
+
+- name: Copy apr-util data to httpd source directory
+  command: >
+    cp -pvr /data/source/apr-util-1.6.1/* /data/source/httpd-2.4.57/srclib/apr-util/
+
+- name: Print the list of directories stored in the current cache
+  command: >
+    ldconfig -p && LDFLAGS=-Wl,-R,/data/tools/lib
+
+
+- name: Create symlink for httpd
+  command: >
+    ln -s /etc/init.d/httpd-2.4.57 /etc/rc3.d/S92httpd-2.4.57
+
+
+
+- name: Create the 'ld.so.conf.d' directory if not exists
+  file:
+    path: /etc/ld.so.conf.d
+    state: directory
+    mode: '0755'
+  register: ld_so_conf
+
+- name: Display whether the directory was created
+  debug:
+    var: ld_so_conf.changed
+
+- name: Create datamaster.conf file
+  file:
+    path: /etc/ld.so.conf.d/datamaster.conf
+    state: touch  
+
+
+
+# sudo cp -pvr pcre-8.45 /data/tools/repository/

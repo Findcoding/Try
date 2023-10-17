@@ -1,0 +1,88 @@
+---
+- name: Install perl-ExtUtils-Embed package
+  yum:
+    name: perl-ExtUtils-Embed
+    state: present
+
+- name: Create the 'source' directory if not exists
+  file:
+    path: /data/source
+    state: directory
+    mode: '0755'
+  register: source_directory_created
+
+- name: Display whether the directory was created
+  debug:
+    var: source_directory_created.changed
+
+- name: Tar File Transfer
+  import_tasks: file_transfer.yml
+
+- name: Export proxy environment variable
+  shell: export https_proxy=http://jpe3proxy.jaws.jio.com:8080 && export http_proxy=http://jpe3proxy.jaws.jio.com:8080
+
+
+- name: List of all tar files to untar
+  set_fact:
+    files_to_untar:
+      - "/data/source/nginx-1.24.0.tar.gz"
+      - "/data/source/zlib-1.2.8.tar.gz"
+      - "/data/source/openssl-1.1.1v.tar.gz"
+      - "/data/source/pcre-8.45.tar.gz"
+      - "/data/source/php-5.5.38.tar.gz"
+
+- name: Untar the files
+  unarchive:
+    src: "{{ item }}"
+    dest: "/data/source/"
+    copy: no
+  loop: "{{ files_to_untar }}"
+
+- name: Create the 'tools' directory if not exists
+  file:
+    path: /data/tools
+    state: directory
+    mode: '0755'
+  register: tools_directory_created
+
+- name: Display whether the directory was created
+  debug:
+    var: tools_directory_created.changed
+
+
+- name: Create the 'repository' directory if not exists
+  file:
+    path: /data/tools/repository
+    state: directory
+    mode: '0755'
+  register: repository_directory_created
+
+- name: Display whether the directory was created
+  debug:
+    var: repository_directory_created.changed
+
+
+- name: Configure Nginx
+  shell: cd /data/source/nginx-1.24.0 && ./configure --prefix=/data/tools/repository/nginx-1.24.0 --with-http_stub_status_module --with-http_ssl_module --with-pcre=/data/source/pcre-8.45 --with-openssl=/data/source/openssl-1.1.1v --with-zlib=/data/source/zlib-1.2.8  --with-http_perl_module --with-ld-opt="-Wl,-E"
+  args:
+    chdir: /data/source/nginx-1.24.0
+
+- name: Make Install
+  shell: cd /data/source/nginx-1.24.0/ && make && make install
+
+
+- name: Stow Nginx
+  shell: cd /data/tools/repository/ && stow nginx-1.24.0
+
+
+- name: Configure PHP
+  shell: cd /data/source/php-5.5.38 && ./configure --prefix=/data/tools/repository/php-5.5.38 --with-config-file-path=/data/tools/repository/php-5.5.38/etc --with-mysql=mysqlnd --with-mysqli=mysqlnd --with-pdo-mysql=mysqlnd --with-pear --enable-fpm --enable-soap --enable-sockets --enable-mbstring --enable-ftp --disable-debug --enable-session --with-regex=php --enable-debug=no --enable-ctype --with-gettext --disable-rpath --enable-wddx=shared --enable-opcache=no --enable-pdo --enable-pcntl --with-libxml-dir=/data/tools
+  args:
+    chdir: /data/source/php-5.5.38
+
+- name: Make Install
+  shell: cd /data/source/php-5.5.38/ && make && make install
+
+
+- name: Stow PHP
+  shell: cd /data/tools/repository/ && stow php-5.5.38

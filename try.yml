@@ -1,0 +1,50 @@
+---
+- name: Copy Files and Perform Other Tasks
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  become: yes
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    git_repo_url: "gitlab.jprp.jio.com/agriiot/jkkm/kmsv2.git"
+    git_dest_dir: "/data/bijendar/node/kmsv2"
+    git_usr: "kms-frontend"
+    git_psw: "nDzNzvv1PnayxYZduzkN"
+    git_branch: "KMS-FRONTEND-DEV"
+
+
+
+  tasks:
+    - name: Delete file from Artifactory using curl module
+      community.general.curl:
+        url: "http://10.135.128.207/artifactory/jkkm/tags/bijendar/archive.tar.gz"
+        method: DELETE
+        user: "jiokrishi"
+        password: "jiokrishi"
+        force_basic_auth: yes
+        status_code: 204  # 204 No Content is expected for successful DELETE requests
+      register: delete_result
+
+    - name: Display delete result
+      debug:
+        var: delete_result
+    
+
+    - name: Upload file to Artifactory using curl module
+      uri:
+        url: "http://10.135.128.207/artifactory/jkkm/tags/bijendar/"
+        method: PUT
+        user: "jiokrishi"
+        password: "jiokrishi"
+        src: "/data/bijendar/node/archive.tar.gz"
+        force_basic_auth: yes
+        status_code: 201
+      register: upload_result
+
+    - name: Display upload result
+      debug:
+        var: upload_result
+
+
+    

@@ -1,0 +1,33 @@
+---
+- name: Deploy project with Docker using Ansible
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  become: yes
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  tasks:
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+
+    - name: Install Docker Python module
+      pip:
+        name: docker
+        executable: pip3
+        state: present
+
+    - name: Build Docker container
+      docker_container:
+        name: try_ansible_node
+        image: try_node
+        state: started
+        detach: yes
+      register: container_info
+
+    - name: Copy data from Docker container to local directory
+      command: docker cp {{ container_info.container.Id }}:/app/ /data/bijendar/node/temp/

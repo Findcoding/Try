@@ -1,0 +1,93 @@
+---
+- name: Deploy project with Docker using Ansible
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  become: yes
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    git_repo_url: "gitlab.jprp.jio.com/agriiot/jkkm/kmsv2.git"
+    git_dest_dir: "/data/bijendar/node/kmsv2"
+    git_usr: "kms-frontend"
+    git_psw: "nDzNzvv1PnayxYZduzkN"
+    git_branch: "KMS-FRONTEND-DEV"
+
+
+  tasks:
+    - name: Clone Git repository
+      ansible.builtin.git:
+        repo: "http://{{ git_usr }}:{{ git_psw }}@{{ git_repo_url }}"
+        dest: "{{ git_dest_dir }}"
+        version: "{{ git_branch }}"
+    
+    - name: Checkout specific version within the cloned branch
+      command: git checkout "{{ git_version }}"
+      args:
+        chdir: "{{ git_dest_dir }}"
+      
+    - name: Copy all files
+      copy:
+        src: "/data/bijendar/node/kmsv2/"
+        dest: "/data/bijendar/node"
+      
+    - name: Remove "kmsv2" directory
+      file:
+        path: /data/bijendar/node/kmsv2
+        state: absent
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+    
+    - name: Upgrade pip
+      pip:
+        name: pip
+        executable: pip3
+        state: latest
+
+    - name: Install Docker Python module
+      pip:
+        name: docker
+        executable: pip3
+        state: present
+
+
+    - name: Build project Docker image from Dockerfile
+      docker_image:
+        name: ansible_node_image  
+        build:
+          path: /data/bijendar/node
+          pull: yes
+        source: build  
+        state: present
+
+
+    - name: Build npm project inside Docker container
+      docker_container:
+        name: nodejs_app
+        image: ansible_node_image
+        state: started
+        detach: yes
+        command:
+          - sh
+          - -c
+          - "cd /app && npm install && npm run build"
+        volumes:
+          - /data/bijendar/node:/app
+        ports:
+          - "8888:8000"    
+    
+    - name: Stop Docker container
+      docker_container:
+        name: nodejs_app
+        state: stopped
+      ignore_errors: yes  # Ignore errors if the container is not running
+
+    - name: Remove Docker container
+      docker_container:
+        name: nodejs_app
+        state: absent
+
+    # - name: Upload build to Artifactory
